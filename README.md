@@ -134,3 +134,11 @@ printf '4\n2 7 11 15\n9\n' | java Main
 - [098. Sort Colors](./098-sort-colors/)
 - [099. Next Permutation](./099-next-permutation/)
 - [100. Find the Duplicate Number](./100-find-the-duplicate-number/)
+
+## Extras
+
+Hot 100 之外的补充练习：手写经典排序算法。
+
+- [101. Merge Sort](./101-merge-sort/)
+- [102. Quick Sort](./102-quick-sort/)
+- [103. Heap Sort](./103-heap-sort/)
