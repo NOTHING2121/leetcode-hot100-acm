@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Run a problem's README examples with Java source-file mode."""
+
+import argparse
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+
+ROOT = Path(__file__).resolve().parent
+
+
+def read_examples(readme):
+    text = readme.read_text(encoding="utf-8")
+    blocks = re.findall(
+        r"^(输入|输出)[：:]\s*\n\s*```[^\n]*\n(.*?)^```[ \t]*$",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if not blocks or len(blocks) % 2:
+        raise ValueError("README 中没有完整的输入 / 输出样例")
+    examples = []
+    for i in range(0, len(blocks), 2):
+        if blocks[i][0] != "输入" or blocks[i + 1][0] != "输出":
+            raise ValueError("README 样例的输入 / 输出顺序不匹配")
+        examples.append((blocks[i][1], blocks[i + 1][1]))
+    return examples
+
+
+def normalize(text):
+    # Ignore line endings, trailing spaces, and final blank lines.
+    return "\n".join(line.rstrip() for line in text.splitlines()).rstrip("\n")
+
+
+def show(label, text):
+    print(label)
+    print(text.rstrip("\n") if text else "（空）")
+
+
+def positive_seconds(value):
+    seconds = float(value)
+    if not 0 < seconds < float("inf"):
+        raise argparse.ArgumentTypeError("超时秒数必须是有限的正数")
+    return seconds
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="自动运行 README 中的全部样例，需要 Python 3 和 JDK 11+。",
+        epilog="示例：./test 31    ./test 031 --timeout 20",
+    )
+    parser.add_argument("number", help="题号，例如 31、031、103")
+    parser.add_argument("--timeout", type=positive_seconds, default=10,
+                        help="每个样例的超时秒数，含 Java 启动和源码编译（默认 10）")
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9]{1,3}", args.number):
+        parser.error("题号应为 1 至 3 位数字，例如 31 或 031")
+    matches = sorted(ROOT.glob(f"{int(args.number):03d}-*"))
+    matches = [path for path in matches if path.is_dir()]
+    if len(matches) != 1:
+        parser.error(f"找不到唯一的题目目录：{args.number}")
+    problem = matches[0]
+    source = problem / "Main.java"
+    if not source.is_file():
+        parser.error(f"找不到 {source}")
+    java = shutil.which("java")
+    if not java:
+        parser.error("找不到 java，请先安装 JDK 11 或更高版本")
+    try:
+        examples = read_examples(problem / "README.md")
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+
+    print(f"测试 {problem.name}，共 {len(examples)} 个样例", flush=True)
+    passed = 0
+    for index, (input_text, expected) in enumerate(examples, 1):
+        try:
+            result = subprocess.run(
+                [java, "-Dfile.encoding=UTF-8", str(source)],
+                input=input_text, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace", cwd=problem,
+                timeout=args.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"样例 {index}: TLE（超过 {args.timeout:g} 秒）")
+            show("输入：", input_text)
+            continue
+        except OSError as error:
+            print(f"无法启动 Java：{error}", file=sys.stderr)
+            return 1
+        if result.returncode:
+            print(f"样例 {index}: ERROR（编译或运行失败，退出码 {result.returncode}）")
+            show("输入：", input_text)
+            show("错误信息：", result.stderr)
+        elif normalize(result.stdout) == normalize(expected):
+            passed += 1
+            print(f"样例 {index}: PASS")
+        else:
+            print(f"样例 {index}: WA（输出不匹配）")
+            show("输入：", input_text)
+            show("期望输出：", expected)
+            show("实际输出：", result.stdout)
+        if result.stderr and not result.returncode:
+            show("标准错误输出：", result.stderr)
+        sys.stdout.flush()
+    print(f"\n通过 {passed}/{len(examples)} 个样例")
+    return 0 if passed == len(examples) else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n测试已中断", file=sys.stderr)
+        sys.exit(130)
